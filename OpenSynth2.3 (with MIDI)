@@ -1,0 +1,970 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Basic Pyo Synth with 2 Oscillators"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "\n",
+      "WxPython is not found for the current python version.\n",
+      "Pyo will use a minimal GUI toolkit written with Tkinter (if available).\n",
+      "This toolkit has limited functionnalities and is no more\n",
+      "maintained or updated. If you want to use all of pyo's\n",
+      "GUI features, you should install WxPython, available here:\n",
+      "http://www.wxpython.org/\n",
+      "\n"
+     ]
+    }
+   ],
+   "source": [
+    "from pyo import *\n",
+    "from tkinter import *\n",
+    "import ipywidgets as wg\n",
+    "from ipywidgets import HBox, VBox\n",
+    "from IPython.display import display\n",
+    "import numpy as np\n",
+    "import cv2\n",
+    "import time\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Helper functions"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def mix(ratio): #amount in percentage used for oscillator one\n",
+    "    return 1.0 - ratio    "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#https://gist.github.com/YuxiUx/ef84328d95b10d0fcbf537de77b936cd\n",
+    "def noteToFreq(note):\n",
+    "    a = 440 #frequency of A (coomon value is 440Hz)\n",
+    "    return (a / 32) * (2 ** ((note - 9) / 12))\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def note_events(status, data1, data2): #Add detune parameter to osc_b then freq+detune for b freq\n",
+    "    \n",
+    "    if status == 144: #Note on\n",
+    "        \n",
+    "        #print(status, data1, data2)\n",
+    "        \n",
+    "        freq = noteToFreq(data1)\n",
+    "        #print(data1)\n",
+    "        amp = data2/128\n",
+    "        #print(amp)\n",
+    "        oscA_L.setFreq(freq)\n",
+    "        oscA_R.setFreq(freq)\n",
+    "        oscB_L.setFreq(freq)\n",
+    "        oscB_R.setFreq(freq)\n",
+    "        \n",
+    "        oscA_L.setMul(amp)\n",
+    "        oscA_R.setMul(amp)\n",
+    "        oscB_L.setMul(amp)\n",
+    "        oscB_R.setMul(amp)  \n",
+    "        \n",
+    "    if status == 128: #Note off\n",
+    "        \n",
+    "        #print(status, data1, data2)\n",
+    "        amp = 0\n",
+    "        oscA_L.setMul(amp)\n",
+    "        oscA_R.setMul(amp)\n",
+    "        oscB_L.setMul(amp)\n",
+    "        oscB_R.setMul(amp)\n",
+    "\n",
+    "    \n",
+    "    #can also add other midi status cases, like Pitchbend, After touch, and Polyphony\n",
+    "    \n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 13,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def sel_waveform(left, right):\n",
+    "    \n",
+    "    tri = TriangleTable()\n",
+    "    sqr = SquareTable()\n",
+    "    saw = SawTable()\n",
+    "    sin = HarmTable([1])\n",
+    "    \n",
+    "    output = wg.Output()\n",
+    "\n",
+    "\n",
+    "    waveforms = wg.ToggleButtons(\n",
+    "        options=['Sine', 'Triangle', 'Sawtooth', 'Square'],\n",
+    "        )\n",
+    "    waveforms\n",
+    "    \n",
+    "    select_wave = wg.Button(\n",
+    "        description = 'Set Waveform')\n",
+    "    select_wave\n",
+    "\n",
+    "    def set_wave(b):\n",
+    "        waveform = waveforms.value\n",
+    "        if waveform == 'Triangle':\n",
+    "            left.setTable(tri)\n",
+    "            right.setTable(tri)\n",
+    "            \n",
+    "        if waveform == 'Sine':\n",
+    "            left.setTable(sin)\n",
+    "            right.setTable(sin)\n",
+    "        if waveform == 'Sawtooth':\n",
+    "            left.setTable(saw)\n",
+    "            right.setTable(saw)\n",
+    "        if waveform == 'Square':\n",
+    "            left.setTable(sqr)\n",
+    "            right.setTable(sqr)   \n",
+    "        \n",
+    "        print(waveform, \"wave selected. \")\n",
+    "\n",
+    "\n",
+    "    select_wave.on_click(set_wave)\n",
+    "\n",
+    "\n",
+    "    tab1 = wg.HBox([wg.VBox([waveforms, select_wave])])\n",
+    "    display(tab1, output)\n",
+    "\n",
+    "    \n",
+    "    "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 25,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def osc_controls(a_L, a_R, b_L, b_R):\n",
+    "    \n",
+    "    osc = wg.ToggleButtons(\n",
+    "        options=['Osc A', 'Osc B', 'Mix', 'Back'],)\n",
+    "    osc\n",
+    "    \n",
+    "    select_wave = wg.Button(\n",
+    "        description = 'Select')\n",
+    "    select_wave\n",
+    "    \n",
+    "    def selection(b):\n",
+    "        sel = osc.value\n",
+    "        if sel == 'Osc A':\n",
+    "            left = a_L\n",
+    "            right = a_R\n",
+    "        if sel == 'Osc B':\n",
+    "            left = b_L\n",
+    "            right = b_R\n",
+    "            \n",
+    "        if sel == 'Osc A' or sel == 'Osc B':\n",
+    "            wav_freq(sel, left, right)\n",
+    "        \n",
+    "          \n",
+    "        if sel == 'Mix': #move to different part\n",
+    "            def on_value_change(change): #for slider\n",
+    "                with output:\n",
+    "                    ratio = change.new \n",
+    "                    oscA_L.setMul(ratio)\n",
+    "                    oscA_R.setMul(ratio)\n",
+    "                    oscB_L.setMul(mix(ratio))\n",
+    "                    oscB_R.setMul(mix(ratio))\n",
+    "                \n",
+    "            f_slider = wg.FloatSlider(value = 0.5, min=0, max = 1)\n",
+    "            display(f_slider, output)\n",
+    "            f_slider.observe(on_value_change, names = 'value')\n",
+    "            \n",
+    "            \n",
+    "            \n",
+    "        if sel == 'Back':\n",
+    "            display_menu()\n",
+    "    \n",
+    "\n",
+    "            \n",
+    "    select_wave.on_click(selection)\n",
+    "    tab1 = wg.HBox([wg.VBox([osc, select_wave])])\n",
+    "    display(tab1, output)\n",
+    "            \n",
+    "            \n",
+    "def wav_freq(sel, left, right):\n",
+    "            \n",
+    "    osc = wg.ToggleButtons(\n",
+    "    options=['Waveforms', 'Frequency', 'Back'],\n",
+    "    )\n",
+    "    osc\n",
+    "\n",
+    "    select_wave = wg.Button(\n",
+    "    description = 'Select')\n",
+    "    select_wave\n",
+    "    def selection(b):\n",
+    "        sel = osc.value\n",
+    "        if sel == 'Waveforms':\n",
+    "            #select waveform\n",
+    "            sel_waveform(left, right)\n",
+    "        if sel == 'Frequency':\n",
+    "            \n",
+    "            def on_value_change(change): #for slider\n",
+    "                with output:\n",
+    "                    freq = change.new \n",
+    "                    left.setFreq(freq)\n",
+    "                    right.setFreq(freq)\n",
+    "                \n",
+    "            f_slider = wg.IntSlider(value = 440, min=0, max = 2000)\n",
+    "            display(f_slider, output)\n",
+    "            f_slider.observe(on_value_change, names = 'value')\n",
+    "        \n",
+    "\n",
+    "            \n",
+    "        if sel == 'Back':\n",
+    "            display_menu()\n",
+    "            \n",
+    "    select_wave.on_click(selection)\n",
+    "    tab1 = wg.HBox([wg.VBox([osc, select_wave])])\n",
+    "    display(tab1, output)\n",
+    "    \n",
+    "\n",
+    "            \n",
+    "        \n",
+    "        "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 26,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def filter_controls(a_L, a_R, b_L, b_R):\n",
+    "    \n",
+    "    print(\"0-Low pass, 1-Highpass\")\n",
+    "    sel = int(input())\n",
+    "    print(\"Enter Cut off Frequency:\")\n",
+    "    f = float(input())\n",
+    "    \n",
+    "    f1 = Biquad(a_L, freq=f, q=5, type=sel).out()\n",
+    "    f2 = Biquad(a_R, freq=f, q=5, type=sel).out(1)\n",
+    "    f3 = Biquad(b_L, freq=f, q=5, type=sel).out()\n",
+    "    f4 = Biquad(b_R, freq=f, q=5, type=sel).out(1)\n",
+    "\n",
+    "    "
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Main Program (Text Based)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 31,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Pyo warning: Portmidi warning: no midi device found!\n",
+      "Portmidi closed.\n"
+     ]
+    },
+    {
+     "data": {
+      "application/vnd.jupyter.widget-view+json": {
+       "model_id": "94d7d907748e4e90931d506374a88a20",
+       "version_major": 2,
+       "version_minor": 0
+      },
+      "text/plain": [
+       "VBox(children=(ToggleButtons(description='MENU:', options=('Oscillators', 'Filter', 'Object-Tracker', 'Quit'),…"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "data": {
+      "application/vnd.jupyter.widget-view+json": {
+       "model_id": "b8a7f8f6d7c944f8b37a199148627d83",
+       "version_major": 2,
+       "version_minor": 0
+      },
+      "text/plain": [
+       "Output()"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "data": {
+      "application/vnd.jupyter.widget-view+json": {
+       "model_id": "86b700e75f0f420994dad994a35a3fdc",
+       "version_major": 2,
+       "version_minor": 0
+      },
+      "text/plain": [
+       "HBox(children=(VBox(children=(ToggleButtons(options=('Osc A', 'Osc B', 'Mix', 'Back'), value='Osc A'), Button(…"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "data": {
+      "application/vnd.jupyter.widget-view+json": {
+       "model_id": "b8a7f8f6d7c944f8b37a199148627d83",
+       "version_major": 2,
+       "version_minor": 0
+      },
+      "text/plain": [
+       "Output()"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "data": {
+      "application/vnd.jupyter.widget-view+json": {
+       "model_id": "bb27ee48437c40048d07d9533b9792d9",
+       "version_major": 2,
+       "version_minor": 0
+      },
+      "text/plain": [
+       "FloatSlider(value=0.5, max=1.0)"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "data": {
+      "application/vnd.jupyter.widget-view+json": {
+       "model_id": "b8a7f8f6d7c944f8b37a199148627d83",
+       "version_major": 2,
+       "version_minor": 0
+      },
+      "text/plain": [
+       "Output()"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "data": {
+      "application/vnd.jupyter.widget-view+json": {
+       "model_id": "66531c75559f4d1cbcd5e1878adee5a3",
+       "version_major": 2,
+       "version_minor": 0
+      },
+      "text/plain": [
+       "VBox(children=(ToggleButtons(description='MENU:', options=('Oscillators', 'Filter', 'Object-Tracker', 'Quit'),…"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "data": {
+      "application/vnd.jupyter.widget-view+json": {
+       "model_id": "b8a7f8f6d7c944f8b37a199148627d83",
+       "version_major": 2,
+       "version_minor": 0
+      },
+      "text/plain": [
+       "Output()"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "data": {
+      "application/vnd.jupyter.widget-view+json": {
+       "model_id": "21e0cb8300c94eaeaa82d77201f82f20",
+       "version_major": 2,
+       "version_minor": 0
+      },
+      "text/plain": [
+       "VBox(children=(ToggleButtons(options=('Theremin Mode', 'MIDI Mode'), value='Theremin Mode'), Button(descriptio…"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "data": {
+      "application/vnd.jupyter.widget-view+json": {
+       "model_id": "b8a7f8f6d7c944f8b37a199148627d83",
+       "version_major": 2,
+       "version_minor": 0
+      },
+      "text/plain": [
+       "Output()"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Quitting\n"
+     ]
+    }
+   ],
+   "source": [
+    "#Main Program\n",
+    "s = Server()\n",
+    "s.setMidiInputDevice(99) # opens all devices\n",
+    "s.boot()\n",
+    "s.start()\n",
+    "output = wg.Output()\n",
+    "\n",
+    "\n",
+    "#Waveforms\n",
+    "tri = TriangleTable()\n",
+    "sqr = SquareTable()\n",
+    "saw = SawTable()\n",
+    "sin = HarmTable([1])\n",
+    "\n",
+    "#Initial Values\n",
+    "amp = 0.3\n",
+    "freq = 220\n",
+    "\n",
+    "#Oscillators\n",
+    "oscA_L = Osc(table=sin, freq = freq, mul = amp)\n",
+    "oscA_R = Osc(table=sin, freq = freq, mul = amp)\n",
+    "oscB_L = Osc(table=tri, freq = freq, mul = amp)\n",
+    "oscB_R = Osc(table=tri, freq = freq, mul = amp)\n",
+    "\n",
+    "filterA_L = Biquad(oscA_L, freq=20000, q=3).out()\n",
+    "filterA_R = Biquad(oscA_R, freq=20000, q=3).out(1)\n",
+    "filterB_L = Biquad(oscB_L, freq=20000, q=3).out()\n",
+    "filterB_R = Biquad(oscB_R, freq=20000, q=3).out(1)\n",
+    "\n",
+    "wait = 1\n",
+    "\n",
+    "notes = RawMidi(note_events)\n",
+    "    \n",
+    "def display_menu():\n",
+    "    menu = wg.ToggleButtons(\n",
+    "    options=['Oscillators', 'Filter','Object-Tracker', 'Quit'],\n",
+    "    description= 'MENU:',)\n",
+    "    menu\n",
+    "\n",
+    "    select_wave = wg.Button(\n",
+    "    description = 'Select')\n",
+    "    select_wave\n",
+    "    \n",
+    "    def selection(b):\n",
+    "        sel = menu.value\n",
+    "        if sel == 'Oscillators':\n",
+    "            osc_controls(oscA_L, oscA_R, oscB_L, oscB_R)   \n",
+    "\n",
+    "        if sel == 'Quit':\n",
+    "            print('Quitting')\n",
+    "            oscA_L.stop()\n",
+    "            oscA_R.stop()\n",
+    "            oscB_L.stop()\n",
+    "            oscB_R.stop() \n",
+    "            s.stop()\n",
+    "            \n",
+    "        if sel == 'Filter':\n",
+    "            def on_value_change(change): #for slider\n",
+    "                with output:\n",
+    "                    freq = change.new \n",
+    "                    filterA_L.setFreq(freq)\n",
+    "                    filterA_R.setFreq(freq)\n",
+    "                    filterB_L.setFreq(freq)\n",
+    "                    filterB_R.setFreq(freq)\n",
+    "                \n",
+    "            f_slider = wg.IntSlider(value = 440, min=0, max = 20000)\n",
+    "            display(f_slider, output)\n",
+    "            f_slider.observe(on_value_change, names = 'value')\n",
+    "            \n",
+    "            \n",
+    "            \n",
+    "        # OBJECT TRACKING OPTIONS\n",
+    "        if sel == 'Object-Tracker':\n",
+    "            \n",
+    "            #select midi or theremin mode\n",
+    "            mode = wg.ToggleButtons(\n",
+    "            options=['Theremin Mode', 'MIDI Mode'],\n",
+    "            )\n",
+    "            mode\n",
+    "\n",
+    "            select_wave = wg.Button(\n",
+    "            description = 'Start Object Tracker')\n",
+    "            select_wave\n",
+    "            \n",
+    "            def selection(b):\n",
+    "                global theremin\n",
+    "                global midi\n",
+    "                theremin = 0\n",
+    "                midi = 0\n",
+    "                \n",
+    "                sel = mode.value\n",
+    "                if sel == 'Theremin Mode':\n",
+    "                    theremin = 1\n",
+    "                if sel == 'MIDI Mode':\n",
+    "                    midi= 1\n",
+    "            \n",
+    "                def drawBox(frame,bbox):\n",
+    "                    global x_prev, y_prev\n",
+    "                    #global flag\n",
+    "                    x_temp = 0\n",
+    "                    y_temp = 0\n",
+    "\n",
+    "                    x, y, w, h = int(bbox[0]),int(bbox[1]),int(bbox[2]),int(bbox[3]) \n",
+    "                    cv2.rectangle(frame, (x,y), ((x+w),(y+h)), (255,0,255), 3,1)\n",
+    "                    cv2.putText(frame,\"Tracking\",(75,75), cv2.FONT_HERSHEY_COMPLEX, 0.7,(0,255,0),2)\n",
+    "\n",
+    "                    x_prev = x\n",
+    "                    y_prev = y\n",
+    "\n",
+    "                    return x,x_temp,y,y_temp\n",
+    "\n",
+    "\n",
+    "\n",
+    "                # define a video capture object \n",
+    "                vid = cv2.VideoCapture(0) \n",
+    "                time.sleep(3)\n",
+    "\n",
+    "\n",
+    "                #bit slower, more accurate\n",
+    "                tracker = cv2.TrackerCSRT_create()\n",
+    "\n",
+    "\n",
+    "                #starts loop\n",
+    "                ret, frame = vid.read() \n",
+    "\n",
+    "                bbox = cv2.selectROI(\"Tracking\",frame, False)\n",
+    "                tracker.init(frame,bbox)\n",
+    "\n",
+    "                while(True): \n",
+    "\n",
+    "                    timer = cv2.getTickCount() \n",
+    "                    # Capture the video frame \n",
+    "                    ret, frame = vid.read() \n",
+    "\n",
+    "                    #searches for object in frame\n",
+    "                    ret, bbox = tracker.update(frame)\n",
+    "\n",
+    "                    #if object is found in frame\n",
+    "                    if ret:\n",
+    "                        x,x_prv, y, y_prv = drawBox(frame,bbox)\n",
+    "\n",
+    "                        #update parameter values \n",
+    "                        #amp = float(update_amp(y,y_prv))\n",
+    "                        if theremin == 1:\n",
+    "                            oscA_L.setFreq(x)\n",
+    "                            oscA_R.setFreq(x)\n",
+    "                            oscB_L.setFreq(x)\n",
+    "                            oscB_R.setFreq(x)\n",
+    "                            \n",
+    "                            #amplitude is (y/max y value) so that it never surpasses 1.0\n",
+    "                            amp = y/717\n",
+    "                            oscA_L.setMul(amp)\n",
+    "                            oscA_R.setMul(amp)\n",
+    "                            oscB_L.setMul(amp)\n",
+    "                            oscB_R.setMul(amp)\n",
+    "                            \n",
+    "                            \n",
+    "                        #update synth stream \n",
+    "                        if midi == 1:\n",
+    "                            \n",
+    "                            #using y * 26 so that range goes from 0Hz- ~20,000Hz\n",
+    "                            f = y * 26\n",
+    "                            filterA_L.setFreq(f)\n",
+    "                            filterA_R.setFreq(f)\n",
+    "                            filterB_L.setFreq(f)\n",
+    "                            filterB_R.setFreq(f)\n",
+    "                            \n",
+    "                            #x/1279 so that the ratio is between 0.0 and 1.0\n",
+    "                            #meaning left is osc_B and right is osc_A\n",
+    "                            ratio = x/1279\n",
+    "                            oscA_L.setMul(ratio)\n",
+    "                            oscA_R.setMul(ratio)\n",
+    "                            oscB_L.setMul(mix(ratio))\n",
+    "                            oscB_R.setMul(mix(ratio))\n",
+    "                            \n",
+    "\n",
+    "\n",
+    "                    #if object is not found in frame        \n",
+    "                    else:\n",
+    "                        cv2.putText(frame,\"Lost\",(75,75), cv2.FONT_HERSHEY_COMPLEX, 0.7,(0,0,255),2)\n",
+    "\n",
+    "                    fps = cv2.getTickFrequency()/(cv2.getTickCount()-timer)\n",
+    "                    cv2.putText(frame,str(int(fps)),(75,50), cv2.FONT_HERSHEY_COMPLEX, 0.7,(0,0,255),2)\n",
+    "\n",
+    "                    # Display the resulting frame \n",
+    "                    cv2.imshow('frame', frame) \n",
+    "\n",
+    "                    # press q to quit\n",
+    "                    if cv2.waitKey(1) & 0xFF == ord('q'): \n",
+    "                            break\n",
+    "\n",
+    "\n",
+    "                s.stop()            \n",
+    "\n",
+    "                # After the loop release the cap object \n",
+    "                vid.release() \n",
+    "                # Destroy all the windows \n",
+    "                cv2.destroyAllWindows() \n",
+    "                \n",
+    "            select_wave.on_click(selection)\n",
+    "            tab1 = wg.VBox([mode, select_wave])\n",
+    "            display(tab1, output)\n",
+    "\n",
+    "    select_wave.on_click(selection)\n",
+    "    tab1 = wg.VBox([menu, select_wave])\n",
+    "    display(tab1, output)\n",
+    "\n",
+    "display_menu()\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 23,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "s.stop() "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "'''\n",
+    "        \n",
+    "        if text == 2:\n",
+    "            print()\n",
+    "            #still have to create envelope, will be better if we have midi to trigger it\n",
+    "\n",
+    "        if text == 3:\n",
+    "\n",
+    "            print(\"0-Low pass, 1-Highpass\")\n",
+    "            sel = int(input())\n",
+    "\n",
+    "            print(\"Enter Cut off Frequency (Off = 20,000 for LP and 0 for HP):\")\n",
+    "            f = float(input())\n",
+    "\n",
+    "            filterA_L.setType(sel)\n",
+    "            filterA_R.setType(sel)\n",
+    "            filterB_L.setType(sel)\n",
+    "            filterB_R.setType(sel)\n",
+    "\n",
+    "            filterA_L.setFreq(f)\n",
+    "            filterA_R.setFreq(f)\n",
+    "            filterB_L.setFreq(f)\n",
+    "            filterB_R.setFreq(f)\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "#Waveforms\n",
+    "tri = TriangleTable()\n",
+    "sqr = SquareTable()\n",
+    "saw = SawTable()\n",
+    "sin = HarmTable([1])\n",
+    "\n",
+    "#Initial Values\n",
+    "amp = 0.3\n",
+    "freq = 220\n",
+    "\n",
+    "#Oscillators\n",
+    "oscA_L = Osc(table=sin, freq = freq, mul = amp)\n",
+    "oscA_R = Osc(table=sin, freq = freq, mul = amp)\n",
+    "oscB_L = Osc(table=tri, freq = freq, mul = amp)\n",
+    "oscB_R = Osc(table=tri, freq = freq, mul = amp)\n",
+    "\n",
+    "\n",
+    "filterA_L = Biquad(oscA_L, freq=20000, q=3).out()\n",
+    "filterA_R = Biquad(oscA_R, freq=20000, q=3).out(1)\n",
+    "filterB_L = Biquad(oscB_L, freq=20000, q=3).out()\n",
+    "filterB_R = Biquad(oscB_R, freq=20000, q=3).out(1)\n",
+    "\n",
+    "\n",
+    "#text = 1\n",
+    "\n",
+    "#Menu loop\n",
+    "while text != 0:\n",
+    "    \n",
+    "    print(\"1-Oscillators, 2-Envelope, 3-Filter, 4-Amplitude, 0-Quit \")\n",
+    "    text = int(input())\n",
+    "    \n",
+    "    \n",
+    "    if text == 1:\n",
+    "        osc_controls(oscA_L, oscA_R, oscB_L, oscB_R)\n",
+    "        \n",
+    "    if text == 2:\n",
+    "        print()\n",
+    "        #still have to create envelope, will be better if we have midi to trigger it\n",
+    "    \n",
+    "    if text == 3:\n",
+    "\n",
+    "        print(\"0-Low pass, 1-Highpass\")\n",
+    "        sel = int(input())\n",
+    "        \n",
+    "        print(\"Enter Cut off Frequency (Off = 20,000 for LP and 0 for HP):\")\n",
+    "        f = float(input())\n",
+    "        \n",
+    "        filterA_L.setType(sel)\n",
+    "        filterA_R.setType(sel)\n",
+    "        filterB_L.setType(sel)\n",
+    "        filterB_R.setType(sel)\n",
+    "        \n",
+    "        filterA_L.setFreq(f)\n",
+    "        filterA_R.setFreq(f)\n",
+    "        filterB_L.setFreq(f)\n",
+    "        filterB_R.setFreq(f)\n",
+    "        \n",
+    "'''    \n",
+    "            \n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Just some random tests using Pyo objects down below"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#Oscillator Tests\n",
+    "\n",
+    "s = Server()\n",
+    "s.boot()\n",
+    "s.start()\n",
+    "\n",
+    "square = SquareTable()\n",
+    "tri = TriangleTable()\n",
+    "\n",
+    "\n",
+    "freq = 220\n",
+    "\n",
+    "oscL = Osc(table=square, freq = freq, mul = 0.5).out()\n",
+    "oscR = Osc(table=square, freq = freq, mul= 0.5).out(1)\n",
+    "\n",
+    "text = 1\n",
+    "\n",
+    "while text != 0:\n",
+    "    \n",
+    "    text = int(input())\n",
+    "    \n",
+    "    if text == 2:\n",
+    "        oscL.setTable(tri)\n",
+    "        oscR.setTable(tri)\n",
+    "        \n",
+    "    if text == 1:\n",
+    "        oscL.setTable(square)\n",
+    "        oscR.setTable(square)\n",
+    "\n",
+    "        \n",
+    "    if text == 4:\n",
+    "        print(\"Enter frequency:\")\n",
+    "        f = int(input())\n",
+    "        oscL.setFreq(f)\n",
+    "        oscR.setFreq(f)\n",
+    "\n",
+    "oscL.stop()\n",
+    "oscR.stop()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "oscL.stop()\n",
+    "oscR.stop()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "ta = HarmTable([1,.3,.2])\n",
+    "tb = HarmTable([1])\n",
+    "f = Fader(fadein=.1).play()\n",
+    "a = OscBank(ta,100,spread=0,frndf=.25,frnda=.01,num=[10,10],fjit=True,mul=f*0.5).out()\n",
+    "b = OscBank(tb,250,spread=.25,slope=.8,arndf=4,arnda=1,num=[10,10],mul=f*0.4).out()\n",
+    "b.ctrl()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "a.setMul(0.5)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "a.setFrnda(.1)\n",
+    "a.setSpread(0)\n",
+    "a.setFreq(220)\n",
+    "a.setFrndf(100)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "a.stop()\n",
+    "b.stop()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "s.stop()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "s = Server().boot()\n",
+    "s.start()\n",
+    "a = Noise(mul=.7)\n",
+    "lfo = Sine(freq=[.2, .25], mul=1000, add=1500)\n",
+    "f = Biquad(a, freq=lfo, q=5, type=2).out()\n",
+    "f = Biquad(a, freq=lfo, q=5, type=2).out(1)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "f.setType(0)\n",
+    "f.setFreq(300)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "s = Server().boot()\n",
+    "s.start()\n",
+    "\n",
+    "tab = SawTable()\n",
+    "sound = Osc(table=tab, freq=180, mul=0.2)\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "f= Biquad(sound, freq=400, q=5).out()\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "sound.setTable(sin)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "s.stop()"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.7.9"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
